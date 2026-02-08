@@ -16,7 +16,8 @@ A new flutter plugin project.
   s.public_header_files = 'Classes/**/*.h'
   s.dependency 'Flutter'
   s.dependency 'WebRTC-SDK', '137.7151.04'
-  s.ios.deployment_target = '13.0'
+  s.dependency 'GoogleMLKit/FaceDetection', '~> 8.0.0'
+  s.ios.deployment_target = '15.5'
   s.static_framework = true
   s.pod_target_xcconfig = {
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++14',

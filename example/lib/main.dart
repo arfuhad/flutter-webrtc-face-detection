@@ -7,6 +7,7 @@ import 'package:flutter_webrtc_example/src/capture_frame_sample.dart';
 import 'src/adm_sample.dart';
 import 'src/data_packet_cryptor_sample.dart';
 import 'src/device_enumeration_sample.dart';
+import 'src/face_detection_sample.dart';
 import 'src/get_display_media_sample.dart';
 import 'src/get_user_media_sample.dart'
     if (dart.library.js_interop) 'src/get_user_media_sample_web.dart';
@@ -154,6 +155,14 @@ class _MyAppState extends State<MyApp> {
                 context,
                 MaterialPageRoute(
                     builder: (BuildContext context) => DataPacketCryptorSample()));
+          }),
+      RouteItem(
+          title: 'Face Detection',
+          push: (BuildContext context) {
+            Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (BuildContext context) => FaceDetectionSample()));
           }),
     ];
   }

@@ -23,3 +23,12 @@ export 'src/native/android/audio_configuration.dart';
 export 'src/native/ios/audio_configuration.dart';
 export 'src/native/rtc_video_platform_view_controller.dart';
 export 'src/native/rtc_video_platform_view.dart';
+
+// Face detection exports
+export 'src/face_detection/face_detection_config.dart';
+export 'src/face_detection/face_detection_result.dart';
+export 'src/face_detection/face_landmarks.dart';
+export 'src/face_detection/head_pose.dart';
+export 'src/face_detection/blink_event.dart';
+export 'src/native/face_detection_impl.dart';
+export 'src/native/media_stream_track_impl.dart';

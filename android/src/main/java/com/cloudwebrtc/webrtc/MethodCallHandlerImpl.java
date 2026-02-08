@@ -44,6 +44,8 @@ import com.cloudwebrtc.webrtc.video.VideoCapturerInfo;
 import com.cloudwebrtc.webrtc.video.camera.CameraUtils;
 import com.cloudwebrtc.webrtc.video.camera.Point;
 import com.cloudwebrtc.webrtc.video.LocalVideoTrack;
+import com.cloudwebrtc.webrtc.facedetection.FaceDetectionConfig;
+import com.cloudwebrtc.webrtc.facedetection.FaceDetectionFrameProcessor;
 import com.twilio.audioswitch.AudioDevice;
 
 import org.webrtc.AudioTrack;
@@ -115,6 +117,7 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
   private final Map<String, MediaStream> localStreams = new HashMap<>();
   private final Map<String, LocalTrack> localTracks = new HashMap<>();
   private final LongSparseArray<FlutterRTCVideoRenderer> renders = new LongSparseArray<>();
+  private final Map<String, FaceDetectionFrameProcessor> faceDetectionProcessors = new HashMap<>();
 
   public RecordSamplesReadyCallbackAdapter recordSamplesReadyCallbackAdapter;
 
@@ -170,6 +173,12 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
   }
 
   void dispose() {
+    // Dispose face detection processors first
+    for (final FaceDetectionFrameProcessor processor : faceDetectionProcessors.values()) {
+      processor.dispose();
+    }
+    faceDetectionProcessors.clear();
+
     for (final MediaStream mediaStream : localStreams.values()) {
       streamDispose(mediaStream);
       mediaStream.dispose();
@@ -1127,6 +1136,30 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
       case "setLogSeverity": {
         //now it's possible to setup logSeverity only via PeerConnectionFactory.initialize method
         //Log.d(TAG, "no implementation for 'setLogSeverity'");
+        break;
+      }
+      // Face Detection methods
+      case "enableFaceDetection": {
+        String trackId = call.argument("trackId");
+        Map<String, Object> configMap = call.argument("config");
+        enableFaceDetection(trackId, configMap, result);
+        break;
+      }
+      case "disableFaceDetection": {
+        String trackId = call.argument("trackId");
+        disableFaceDetection(trackId, result);
+        break;
+      }
+      case "isFaceDetectionEnabled": {
+        String trackId = call.argument("trackId");
+        boolean enabled = faceDetectionProcessors.containsKey(trackId);
+        result.success(enabled);
+        break;
+      }
+      case "updateFaceDetectionConfig": {
+        String trackId = call.argument("trackId");
+        Map<String, Object> configMap = call.argument("config");
+        updateFaceDetectionConfig(trackId, configMap, result);
         break;
       }
       default:
@@ -2461,5 +2494,93 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
             context,
             activity,
             permissions.toArray(new String[permissions.size()]), callback);
+  }
+
+  // ============== Face Detection Methods ==============
+
+  private void enableFaceDetection(String trackId, Map<String, Object> configMap, Result result) {
+    if (trackId == null) {
+      resultError("enableFaceDetection", "trackId is required", result);
+      return;
+    }
+
+    // Check if already enabled
+    if (faceDetectionProcessors.containsKey(trackId)) {
+      result.success(null);
+      return;
+    }
+
+    // Get the local video track
+    LocalTrack localTrack = getLocalTrack(trackId);
+    if (localTrack == null || !(localTrack instanceof LocalVideoTrack)) {
+      resultError("enableFaceDetection", "Video track not found: " + trackId, result);
+      return;
+    }
+
+    LocalVideoTrack videoTrack = (LocalVideoTrack) localTrack;
+
+    // Create and configure the face detection processor
+    FaceDetectionFrameProcessor processor = new FaceDetectionFrameProcessor();
+    FaceDetectionConfig config = FaceDetectionConfig.fromMap(configMap);
+    processor.setConfig(config);
+
+    // Connect event sinks
+    processor.setFaceEventSink(FlutterWebRTCPlugin.faceEventSink);
+    processor.setBlinkEventSink(FlutterWebRTCPlugin.blinkEventSink);
+
+    // Add processor to the video track
+    videoTrack.addProcessor(processor);
+
+    // Store reference for later removal
+    faceDetectionProcessors.put(trackId, processor);
+
+    Log.d(TAG, "Face detection enabled for track: " + trackId);
+    result.success(null);
+  }
+
+  private void disableFaceDetection(String trackId, Result result) {
+    if (trackId == null) {
+      resultError("disableFaceDetection", "trackId is required", result);
+      return;
+    }
+
+    FaceDetectionFrameProcessor processor = faceDetectionProcessors.remove(trackId);
+    if (processor == null) {
+      // Not enabled, just succeed
+      result.success(null);
+      return;
+    }
+
+    // Get the local video track
+    LocalTrack localTrack = getLocalTrack(trackId);
+    if (localTrack instanceof LocalVideoTrack) {
+      LocalVideoTrack videoTrack = (LocalVideoTrack) localTrack;
+      videoTrack.removeProcessor(processor);
+    }
+
+    // Dispose the processor
+    processor.dispose();
+
+    Log.d(TAG, "Face detection disabled for track: " + trackId);
+    result.success(null);
+  }
+
+  private void updateFaceDetectionConfig(String trackId, Map<String, Object> configMap, Result result) {
+    if (trackId == null) {
+      resultError("updateFaceDetectionConfig", "trackId is required", result);
+      return;
+    }
+
+    FaceDetectionFrameProcessor processor = faceDetectionProcessors.get(trackId);
+    if (processor == null) {
+      resultError("updateFaceDetectionConfig", "Face detection not enabled for track: " + trackId, result);
+      return;
+    }
+
+    FaceDetectionConfig config = FaceDetectionConfig.fromMap(configMap);
+    processor.setConfig(config);
+
+    Log.d(TAG, "Face detection config updated for track: " + trackId);
+    result.success(null);
   }
 }

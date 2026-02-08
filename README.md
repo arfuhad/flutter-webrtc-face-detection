@@ -35,6 +35,7 @@ Enterprise Grade APIs for Feeds, Chat, & Video. <a href="https://getstream.io/vi
 | MediaRecorder | :warning: | :warning: | :heavy_check_mark: | | | | | |
 | End to End Encryption | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | |
 | Insertable Streams | | | | | | | | |
+| Face Detection (ML Kit) | :heavy_check_mark: | :heavy_check_mark: | | | | | | |
 
 Additional platform/OS support from the other community
 
@@ -115,6 +116,81 @@ If necessary, in the same `build.gradle` you will need to increase `minSdkVersio
 
 When you compile the release apk, you need to add the following operations,
 [Setup Proguard Rules](https://github.com/flutter-webrtc/flutter-webrtc/blob/main/android/proguard-rules.pro)
+
+## Face Detection
+
+This fork adds ML Kit-based face detection integrated into the WebRTC video pipeline. Available on **Android** and **iOS** only.
+
+### Features
+
+- Face detection with bounding boxes and tracking IDs
+- Facial landmarks (eyes, nose, mouth positions)
+- Head pose estimation (yaw, pitch, roll)
+- Eye tracking with open/closed state and probability
+- Blink detection with per-eye counting
+- Optional frame capture on blink (base64 JPEG)
+- Non-blocking — runs on a dedicated thread, does not block the video pipeline
+- Configurable frame skipping for performance tuning
+
+### Requirements
+
+- **iOS**: 15.5+ (ML Kit requirement)
+- **Android**: API 24+ (minSdk)
+
+### Usage
+
+```dart
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+
+// Get video track
+final stream = await navigator.mediaDevices.getUserMedia({'video': true});
+final videoTrack = stream.getVideoTracks().first as MediaStreamTrackNative;
+
+// Enable face detection
+await videoTrack.enableFaceDetection(
+  config: FaceDetectionConfig(
+    blinkThreshold: 0.3,
+    captureOnBlink: false,
+  ),
+);
+
+// Listen to face detection results
+videoTrack.onFaceDetected.listen((result) {
+  for (final face in result.faces) {
+    print('Face at ${face.bounds}, tracking: ${face.trackingId}');
+    if (face.landmarks?.leftEye != null) {
+      print('Left eye open: ${face.landmarks!.leftEye!.isOpen}');
+    }
+  }
+});
+
+// Listen to blink events
+videoTrack.onBlinkDetected.listen((event) {
+  print('Blink: ${event.eye.name}, count: ${event.blinkCount}');
+});
+
+// Disable when done
+await videoTrack.disableFaceDetection();
+```
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `frameSkipCount` | 3 | Process every Nth frame (~10 detections/sec at 30fps) |
+| `blinkThreshold` | 0.3 | Eye open probability threshold (0.0-1.0) |
+| `captureOnBlink` | false | Capture a JPEG frame on blink |
+| `cropToFace` | true | Crop captured image to face bounds |
+| `imageQuality` | 0.7 | JPEG quality (0.0-1.0) |
+| `maxImageWidth` | 480 | Max captured image width in pixels |
+
+### Example App
+
+The example app includes a **Face Detection** sample that demonstrates all features with a live camera preview, real-time face info display, blink event log, and configurable controls.
+
+```bash
+cd example && flutter run
+```
 
 ## Contributing
 

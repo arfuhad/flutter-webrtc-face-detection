@@ -30,6 +30,7 @@
 #import "LocalTrack.h"
 #import "LocalAudioTrack.h"
 #import "LocalVideoTrack.h"
+#import "FaceDetectionFrameProcessor.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wprotocol"
@@ -105,6 +106,69 @@ void postEvent(FlutterEventSink _Nullable sink, id _Nullable event) {
     });
 }
 
+// Forward declaration
+@class FlutterWebRTCPlugin;
+
+#pragma mark - Face Event Stream Handler
+
+@interface FaceEventStreamHandler : NSObject <FlutterStreamHandler>
+@property(nonatomic, weak) FlutterWebRTCPlugin* plugin;
+- (instancetype)initWithPlugin:(FlutterWebRTCPlugin*)plugin;
+@end
+
+@implementation FaceEventStreamHandler
+
+- (instancetype)initWithPlugin:(FlutterWebRTCPlugin*)plugin {
+    self = [super init];
+    if (self) {
+        _plugin = plugin;
+    }
+    return self;
+}
+
+- (FlutterError*)onListenWithArguments:(id)arguments eventSink:(FlutterEventSink)events {
+    [_plugin setFaceEventSink:events];
+    return nil;
+}
+
+- (FlutterError*)onCancelWithArguments:(id)arguments {
+    [_plugin setFaceEventSink:nil];
+    return nil;
+}
+
+@end
+
+#pragma mark - Blink Event Stream Handler
+
+@interface BlinkEventStreamHandler : NSObject <FlutterStreamHandler>
+@property(nonatomic, weak) FlutterWebRTCPlugin* plugin;
+- (instancetype)initWithPlugin:(FlutterWebRTCPlugin*)plugin;
+@end
+
+@implementation BlinkEventStreamHandler
+
+- (instancetype)initWithPlugin:(FlutterWebRTCPlugin*)plugin {
+    self = [super init];
+    if (self) {
+        _plugin = plugin;
+    }
+    return self;
+}
+
+- (FlutterError*)onListenWithArguments:(id)arguments eventSink:(FlutterEventSink)events {
+    [_plugin setBlinkEventSink:events];
+    return nil;
+}
+
+- (FlutterError*)onCancelWithArguments:(id)arguments {
+    [_plugin setBlinkEventSink:nil];
+    return nil;
+}
+
+@end
+
+#pragma mark - FlutterWebRTCPlugin Implementation
+
 @implementation FlutterWebRTCPlugin {
 #pragma clang diagnostic pop
   FlutterMethodChannel* _methodChannel;
@@ -116,6 +180,12 @@ void postEvent(FlutterEventSink _Nullable sink, id _Nullable event) {
   BOOL _speakerOn;
   BOOL _speakerOnButPreferBluetooth;
   AVAudioSessionPort _preferredInput;
+  // Face detection
+  FlutterEventChannel* _faceEventChannel;
+  FlutterEventChannel* _blinkEventChannel;
+  FlutterEventSink _faceEventSink;
+  FlutterEventSink _blinkEventSink;
+  NSMutableDictionary<NSString*, id>* _faceDetectionProcessors;
   AudioManager* _audioManager;
 #if TARGET_OS_IPHONE
   FLutterRTCVideoPlatformViewFactory *_platformViewFactory;
@@ -202,6 +272,18 @@ static FlutterWebRTCPlugin *sharedSingleton;
   self.keyProviders = [NSMutableDictionary new];
   self.videoCapturerStopHandlers = [NSMutableDictionary new];
   self.recorders = [NSMutableDictionary new];
+
+  // Face detection setup
+  _faceDetectionProcessors = [NSMutableDictionary new];
+
+  // Face detection event channels
+  _faceEventChannel = [FlutterEventChannel eventChannelWithName:@"FlutterWebRTC/faceDetection/faces"
+                                                binaryMessenger:messenger];
+  [_faceEventChannel setStreamHandler:[[FaceEventStreamHandler alloc] initWithPlugin:self]];
+
+  _blinkEventChannel = [FlutterEventChannel eventChannelWithName:@"FlutterWebRTC/faceDetection/blinks"
+                                                 binaryMessenger:messenger];
+  [_blinkEventChannel setStreamHandler:[[BlinkEventStreamHandler alloc] initWithPlugin:self]];
 #if TARGET_OS_IPHONE
   self.focusMode = @"locked";
   self.exposureMode = @"locked";
@@ -1693,6 +1775,25 @@ static FlutterWebRTCPlugin *sharedSingleton;
       NSNumber* value = call.arguments[@"value"];
       adm.voiceProcessingBypassed = value.boolValue;
       result(nil);
+    } else if ([@"enableFaceDetection" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSString* trackId = argsMap[@"trackId"];
+      NSDictionary* config = argsMap[@"config"];
+      [self enableFaceDetection:trackId config:config result:result];
+    } else if ([@"disableFaceDetection" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSString* trackId = argsMap[@"trackId"];
+      [self disableFaceDetection:trackId result:result];
+    } else if ([@"isFaceDetectionEnabled" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSString* trackId = argsMap[@"trackId"];
+      BOOL enabled = _faceDetectionProcessors[trackId] != nil;
+      result(@(enabled));
+    } else if ([@"updateFaceDetectionConfig" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSString* trackId = argsMap[@"trackId"];
+      NSDictionary* config = argsMap[@"config"];
+      [self updateFaceDetectionConfig:trackId config:config result:result];
     } else {
       if([self handleFrameCryptorMethodCall:call result:result]) {
           return;
@@ -1703,6 +1804,14 @@ static FlutterWebRTCPlugin *sharedSingleton;
 }
 
 - (void)dealloc {
+  // Dispose face detection processors
+  for (NSString* trackId in _faceDetectionProcessors) {
+    FaceDetectionFrameProcessor* processor = _faceDetectionProcessors[trackId];
+    [processor dispose];
+  }
+  [_faceDetectionProcessors removeAllObjects];
+  _faceDetectionProcessors = nil;
+
   [_localTracks removeAllObjects];
   _localTracks = nil;
   [_localStreams removeAllObjects];
@@ -2611,6 +2720,119 @@ static FlutterWebRTCPlugin *sharedSingleton;
     if (self.eventSink) {
       postEvent( self.eventSink, @{@"event" : @"onDeviceChange"});
     }
+}
+
+#pragma mark - Face Detection
+
+- (void)setFaceEventSink:(FlutterEventSink)sink {
+    _faceEventSink = sink;
+}
+
+- (void)setBlinkEventSink:(FlutterEventSink)sink {
+    _blinkEventSink = sink;
+}
+
+- (void)enableFaceDetection:(NSString*)trackId
+                     config:(NSDictionary*)configDict
+                     result:(FlutterResult)result {
+    if (trackId == nil) {
+        result([FlutterError errorWithCode:@"enableFaceDetection"
+                                   message:@"trackId is required"
+                                   details:nil]);
+        return;
+    }
+
+    // Check if already enabled
+    if (_faceDetectionProcessors[trackId] != nil) {
+        result(nil);
+        return;
+    }
+
+    // Get the local video track
+    id<LocalTrack> localTrack = self.localTracks[trackId];
+    if (localTrack == nil || ![localTrack isKindOfClass:[LocalVideoTrack class]]) {
+        result([FlutterError errorWithCode:@"enableFaceDetection"
+                                   message:[NSString stringWithFormat:@"Video track not found: %@", trackId]
+                                   details:nil]);
+        return;
+    }
+
+    LocalVideoTrack* videoTrack = (LocalVideoTrack*)localTrack;
+
+    // Create and configure the face detection processor
+    FaceDetectionFrameProcessor* processor = [[FaceDetectionFrameProcessor alloc] init];
+    FaceDetectionConfig* config = [FaceDetectionConfig configFromDictionary:configDict];
+    [processor setConfig:config];
+
+    // Connect event sinks
+    processor.faceEventSink = _faceEventSink;
+    processor.blinkEventSink = _blinkEventSink;
+
+    // Add processor to the video track
+    [videoTrack addProcessing:processor];
+
+    // Store reference for later removal
+    _faceDetectionProcessors[trackId] = processor;
+
+    NSLog(@"Face detection enabled for track: %@", trackId);
+    result(nil);
+}
+
+- (void)disableFaceDetection:(NSString*)trackId
+                      result:(FlutterResult)result {
+    if (trackId == nil) {
+        result([FlutterError errorWithCode:@"disableFaceDetection"
+                                   message:@"trackId is required"
+                                   details:nil]);
+        return;
+    }
+
+    FaceDetectionFrameProcessor* processor = _faceDetectionProcessors[trackId];
+    if (processor == nil) {
+        // Not enabled, just succeed
+        result(nil);
+        return;
+    }
+
+    [_faceDetectionProcessors removeObjectForKey:trackId];
+
+    // Get the local video track
+    id<LocalTrack> localTrack = self.localTracks[trackId];
+    if ([localTrack isKindOfClass:[LocalVideoTrack class]]) {
+        LocalVideoTrack* videoTrack = (LocalVideoTrack*)localTrack;
+        [videoTrack removeProcessing:processor];
+    }
+
+    // Dispose the processor
+    [processor dispose];
+
+    NSLog(@"Face detection disabled for track: %@", trackId);
+    result(nil);
+}
+
+- (void)updateFaceDetectionConfig:(NSString*)trackId
+                           config:(NSDictionary*)configDict
+                           result:(FlutterResult)result {
+    if (trackId == nil) {
+        result([FlutterError errorWithCode:@"updateFaceDetectionConfig"
+                                   message:@"trackId is required"
+                                   details:nil]);
+        return;
+    }
+
+    FaceDetectionFrameProcessor* processor = _faceDetectionProcessors[trackId];
+    if (processor == nil) {
+        result([FlutterError errorWithCode:@"updateFaceDetectionConfig"
+                                   message:[NSString stringWithFormat:@"Face detection not enabled for track: %@", trackId]
+                                   details:nil]);
+        return;
+    }
+
+    FaceDetectionConfig* config = [FaceDetectionConfig configFromDictionary:configDict];
+    [processor setConfig:config];
+
+    NSLog(@"Face detection config updated for track: %@", trackId);
+    result(nil);
 }
 
 @end
