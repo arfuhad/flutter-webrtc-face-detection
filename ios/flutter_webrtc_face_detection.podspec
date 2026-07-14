@@ -2,13 +2,13 @@
 # To learn more about a Podspec see http://guides.cocoapods.org/syntax/podspec.html
 #
 Pod::Spec.new do |s|
-  s.name             = 'flutter_webrtc'
-  s.version          = '1.4.0'
-  s.summary          = 'Flutter WebRTC plugin for iOS.'
+  s.name             = 'flutter_webrtc_face_detection'
+  s.version          = '0.1.0'
+  s.summary          = 'Flutter WebRTC + on-device face-detection plugin for iOS.'
   s.description      = <<-DESC
-A new flutter plugin project.
+WebRTC plugin with an on-device ML face-detection / blink pipeline. Hard fork of flutter_webrtc.
                        DESC
-  s.homepage         = 'https://github.com/cloudwebrtc/flutter-webrtc'
+  s.homepage         = 'https://github.com/arfuhad/flutter-webrtc-face-detection'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'CloudWebRTC' => 'duanweiwei1982@gmail.com' }
   s.source           = { :path => '.' }

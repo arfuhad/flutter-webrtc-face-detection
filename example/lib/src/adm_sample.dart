@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter_webrtc_face_detection/flutter_webrtc.dart';
 
 class AdmSample extends StatelessWidget {
   @override
